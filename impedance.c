@@ -12,25 +12,25 @@ extern int _getch();
 
 // For PC comment out the following section:
 // For Mac or Linux, uncomment out this following section:
-// #include <unistd.h>
-// #include <stdlib.h>
-// #include <sys/ioctl.h>
-// #include <termios.h>
-// int _getch(void) {
-//     char chbuf;
-//     int nread;
-//     struct termios oldstate, newstate;
-//     tcgetattr(0, &oldstate);
-//     newstate = oldstate;
-//     newstate.c_lflag &= ~ICANON;
-//     newstate.c_lflag &= ~ECHO;
-//     tcsetattr(0, TCSANOW, &newstate);
-//     do {
-//         nread = read(0, &chbuf, 1);
-//     } while (nread <= 0);
-//     tcsetattr(0, TCSANOW, &oldstate);
-//     return chbuf;
-// }
+#include <unistd.h>
+#include <stdlib.h>
+#include <sys/ioctl.h>
+#include <termios.h>
+int _getch(void) {
+    char chbuf;
+    int nread;
+    struct termios oldstate, newstate;
+    tcgetattr(0, &oldstate);
+    newstate = oldstate;
+    newstate.c_lflag &= ~ICANON;
+    newstate.c_lflag &= ~ECHO;
+    tcsetattr(0, TCSANOW, &newstate);
+    do {
+        nread = read(0, &chbuf, 1);
+    } while (nread <= 0);
+    tcsetattr(0, TCSANOW, &oldstate);
+    return chbuf;
+}
 
 
 #define ANSI_CLEAR_SCREEN_AND_HOME "\033[2J\033[H"
@@ -86,9 +86,12 @@ double calc_inductors(int values)
 double calcSWR(double complex imp)
 {
     double gamma = cabs((imp - 50.0) / (imp + 50.0));
+    if (gamma > 0.999999 && gamma < 1.000001)
+        return INFINITY;
     double n = (1.0+gamma) / (1.0-gamma);
-    if (n != n)
+    if (n != n)     // NaN
         n = INFINITY;
+    assert(n >= 1.0);
     return n;
 }
 
@@ -169,10 +172,10 @@ void get_SWR()
 void Relay_set(char l, char c, char i)
 {
     if (i) // TODO - which side should the C be on the LC?, guessing for now, probably doesn't matter
-        SWRexact = calcSWR(ZhpLsu(tuneFreq, tuneImp, inductors[l], capacitors[c ^ 0x7f]));
+        SWRexact = calcSWR(ZhpLsu(tuneFreq, tuneImp, inductors[l], capacitors[c]));
     else
-        SWRexact = calcSWR(ZhpLsd(tuneFreq, tuneImp, inductors[l], capacitors[c ^ 0x7f]));
-    assert(SWRexact >= 1.0);
+        SWRexact = calcSWR(ZhpLsd(tuneFreq, tuneImp, inductors[l], capacitors[c]));
+
     tuneCount++;
     tunedMapHit[i][l][c]++;
     lastTuneC = c;
@@ -193,17 +196,23 @@ void resetTune(double freq, double complex Zin)
     SWRexact = 10;
 }
 
-void viewLCTuneMap(int tuneChoice, double freq, double complex Zin)
+
+void viewLCTuneMap(int tuneChoice, double freq, int resistanceInx, int reactanceInx)
 {
     // increase xsize and ysize to view a larger terminal view //
     const int xsize = 64, ysize = 32;
     const int lcsize = 256;
-    int xoff = 0, yoff = 0, capsw = 0, sinx = 0, zoom = 4;
+    int xoff = 0, yoff = 0, capsw = 0;
+    int sinx = 0, zoom = 4, relocate = 0;
+    double complex Zin = 0;
+
+retune:
+    Zin = resistances[resistanceInx] + I*reactances[reactanceInx];
 
     for (int linx=0; linx<lcsize; linx++) {
         for (int cinx=0; cinx<lcsize; cinx++) {
-            tunedMapSWR[0][linx][cinx] = calcSWR(ZhpLsd(freq, Zin, inductors[linx], capacitors[cinx ^ 0x7f]));
-            tunedMapSWR[1][linx][cinx] = calcSWR(ZhpLsu(freq, Zin, inductors[linx], capacitors[cinx ^ 0x7f]));
+            tunedMapSWR[0][linx][cinx] = calcSWR(ZhpLsd(freq, Zin, inductors[linx], capacitors[cinx]));
+            tunedMapSWR[1][linx][cinx] = calcSWR(ZhpLsu(freq, Zin, inductors[linx], capacitors[cinx]));
         }
     }
 
@@ -256,25 +265,46 @@ void viewLCTuneMap(int tuneChoice, double freq, double complex Zin)
 
             switch(r)
             {
-            case 12:    printf("  SCROLL");                                        break;
-            case 13:    printf("    "  ANSI_HIGHLIGHT "i" ANSI_NORMAL);            break;
-            case 14:    printf("  "    ANSI_HIGHLIGHT "j" ANSI_NORMAL " + " ANSI_HIGHLIGHT "k" ANSI_NORMAL);    break;
-            case 15:    printf("    "  ANSI_HIGHLIGHT "m" ANSI_NORMAL);            break;
-            case 17:    printf("  PAGE");                                          break;
-            case 18:    printf("    "  ANSI_HIGHLIGHT "I" ANSI_NORMAL);            break;
-            case 19:    printf("  "    ANSI_HIGHLIGHT "J" ANSI_NORMAL " + " ANSI_HIGHLIGHT "K" ANSI_NORMAL);      break;
-            case 20:    printf("    "  ANSI_HIGHLIGHT "M" ANSI_NORMAL);            break;
-            case 22:    printf("  "    ANSI_HIGHLIGHT "c" ANSI_NORMAL "ap switch");                                    break;
-            case 23:    printf("  "    ANSI_HIGHLIGHT "z" ANSI_NORMAL "oom+");     break;
-            case 24:    printf("  "    ANSI_HIGHLIGHT "Z" ANSI_NORMAL "oom-");     break;
-            case 25:    printf("  "    ANSI_HIGHLIGHT "s" ANSI_NORMAL "cale+");    break;                                        break;
-            case 26:    printf("  "    ANSI_HIGHLIGHT "s" ANSI_NORMAL "cale-");    break;                                        break;
-            case 27:    printf("  "    ANSI_HIGHLIGHT "q" ANSI_NORMAL "uit");      break;
+            case 12:    printf(relocate ? "  RELOCATE" : "  SCROLL");               break;
+            case 13:    printf("    "  ANSI_HIGHLIGHT "i" ANSI_NORMAL);             break;
+            case 14:    printf("  " ANSI_HIGHLIGHT "j" ANSI_NORMAL " + " ANSI_HIGHLIGHT "k" ANSI_NORMAL);   break;
+            case 15:    printf("    "  ANSI_HIGHLIGHT "m" ANSI_NORMAL);             break;
+            case 17:    printf("  PAGE");                                           break;
+            case 18:    printf("    "  ANSI_HIGHLIGHT "I" ANSI_NORMAL);             break;
+            case 19:    printf("  " ANSI_HIGHLIGHT "J" ANSI_NORMAL " + " ANSI_HIGHLIGHT "K" ANSI_NORMAL);   break;
+            case 20:    printf("    "  ANSI_HIGHLIGHT "M" ANSI_NORMAL);             break;
+            case 22:    printf("  "    ANSI_HIGHLIGHT "c" ANSI_NORMAL "ap switch"); break;
+            case 23:    printf("  "    ANSI_HIGHLIGHT "z" ANSI_NORMAL "oom+");      break;
+            case 24:    printf("  "    ANSI_HIGHLIGHT "Z" ANSI_NORMAL "oom-");      break;
+            case 25:    printf("  "    ANSI_HIGHLIGHT "s" ANSI_NORMAL "cale+");     break; 
+            case 26:    printf("  "    ANSI_HIGHLIGHT "s" ANSI_NORMAL "cale-");     break; 
+            case 27:    printf("  "    ANSI_HIGHLIGHT "r" ANSI_NORMAL "elocate");   break;
+            case 28:    printf("  "    ANSI_HIGHLIGHT "q" ANSI_NORMAL "uit");       break;
             }
             printf("\n");
         }
 
         char ch = _getch();
+        if (relocate) {
+            switch (ch) {
+                case 'i': 
+                    if (resistanceInx > 0)
+                        resistanceInx--;
+                    goto retune;
+                 case 'm':
+                    if (resistanceInx < sizeof(resistances)/sizeof(resistances[0])-1)
+                        resistanceInx++;
+                    goto retune;
+                case 'j': 
+                    if (reactanceInx > 0)
+                        reactanceInx--;
+                    goto retune;
+                case 'k':
+                    if (reactanceInx < sizeof(reactances)/sizeof(reactances[0])-1)
+                        reactanceInx++;
+                    goto retune;
+            }
+        }
         switch (ch) {
             case 'c':
                 capsw = !capsw;
@@ -310,6 +340,9 @@ void viewLCTuneMap(int tuneChoice, double freq, double complex Zin)
             case 's':
                 if (++sinx >= sizeof(scale)/sizeof(double))
                     sinx = 0;   
+                break;
+            case 'r':
+                relocate = !relocate;
                 break;
             case 'q':
                 return;
@@ -468,7 +501,7 @@ void viewResistReactMaps()
             fflush(stdout);
             int y, x;
             scanf("%d,%d", &y, &x);
-            viewLCTuneMap(zoom, freqs[finx], resistances[y] + I*reactances[x]);
+            viewLCTuneMap(zoom, freqs[finx], y, x);
             zoom = 0;
             continue;
         }
