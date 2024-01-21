@@ -57,8 +57,8 @@ int tuneCounts[2][N_FREQS][N_RESISTANCES][N_REACTANCES];
 int digitMap[N_RESISTANCES][N_REACTANCES];
 int histogram[12];      // [0] = '-' for < 0        [11] = '+' for >= 10
 double scale[] = {0.1, 0.2, 0.5, 1.0};
-double tunedMapSWR[2][256][256];
-char tunedMapHit[2][256][256]; 
+double tunedMapSWR[2][128][128];
+char tunedMapHit[2][128][128]; 
 
 
 int calc_capacitors(int values)
@@ -146,7 +146,7 @@ double exaustiveSearch(double freq, double complex Zin)
 
 
 extern int SWR;
-extern unsigned char ind, cap, SW;
+extern char ind, cap, SW;
 double complex tuneImp = 50.0;
 double tuneFreq = 0;
 double SWRexact = 1.0;
@@ -169,8 +169,10 @@ void get_SWR()
     }
 }
 
-void Relay_set(unsigned char l, unsigned char c, char i)
+void Relay_set(char l, char c, char i)
 {
+    assert(l >= 0);
+    assert(c >= 0);
     if (i) // TODO - which side should the C be on the LC?, guessing for now, probably doesn't matter
         SWRexact = calcSWR(ZhpLsu(tuneFreq, tuneImp, inductors[l], capacitors[c]));
     else
@@ -199,9 +201,8 @@ void resetTune(double freq, double complex Zin)
 
 void viewLCTuneMap(int tuneChoice, double freq, int resistanceInx, int reactanceInx)
 {
-    // increase xsize and ysize to view a larger terminal view //
-    const int xsize = 64, ysize = 32;
-    const int lcsize = 256;
+    int xsize = 64, ysize = 32;
+    int lcsize = 128;
     int xoff = 0, yoff = 0, capsw = 0;
     int sinx = 0, zoom = 4, relocate = 0;
     double complex Zin = 0;
@@ -226,6 +227,10 @@ retune:
         tune2();    
     
     for (;;) {
+        if (zoom == 4)
+            xsize = 32;
+        else
+            xsize = 64;
         double curScale = scale[sinx];
         printf(ANSI_CLEAR_SCREEN_AND_HOME); 
         printf("y=%d, x=%d, cSw=%d, zoom=%d   %.1f%+.1fj   tunes=%d   #=%.2f SWR\n", yoff, xoff, capsw, zoom, creal(Zin), cimag(Zin), tuneCount, SWR/100.0);
