@@ -146,7 +146,7 @@ double exaustiveSearch(double freq, double complex Zin)
 
 
 extern int SWR;
-extern char ind, cap, SW;
+extern unsigned char ind, cap, SW;
 double complex tuneImp = 50.0;
 double tuneFreq = 0;
 double SWRexact = 1.0;
@@ -169,7 +169,7 @@ void get_SWR()
     }
 }
 
-void Relay_set(char l, char c, char i)
+void Relay_set(unsigned char l, unsigned char c, char i)
 {
     if (i) // TODO - which side should the C be on the LC?, guessing for now, probably doesn't matter
         SWRexact = calcSWR(ZhpLsu(tuneFreq, tuneImp, inductors[l], capacitors[c]));
