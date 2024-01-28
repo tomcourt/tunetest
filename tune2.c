@@ -49,10 +49,14 @@ void hillClimb(char l, char c, char dist)
    swr[4] = SWR;
    if (l-dist >= 0)
       swr[0] = testSwLC(l-dist, c, SW);
+   else
+      swr[0] = testSwLC(l/2, c, SW);   // half the distance to the edge
    if (l+dist < 128)
       swr[1] = testSwLC(l+dist, c, SW);
    if (c-dist >= 0)
       swr[2] = testSwLC(l, c-dist, SW);
+   else
+      swr[2] = testSwLC(l, c/2, SW);   // half the distance to the edge
    if (c+dist < 128)
       swr[3] = testSwLC(l, c+dist, SW);
    
@@ -65,12 +69,12 @@ void hillClimb(char l, char c, char dist)
          inx = i;
       }
 
-   // setup  for lowest
+   // setup  for lowest found
    SWR = swr[inx];
    switch (inx) {
-   case 0:  ind = l-dist;   cap = c;      break;
+   case 0:  ind = (l>=dist) ? l-dist : l/2;   cap = c;       break;
    case 1:  ind = l+dist;   cap = c;      break;
-   case 2:  ind = l;        cap = c-dist; break;
+   case 2:  ind = l;        cap = (c>=dist) ? c-dist : c/2;  break;
    case 3:  ind = l;        cap = c+dist; break;
    case 4:  ind = l;        cap = c;      break;
    }
@@ -85,8 +89,19 @@ void tune(void) {
    for (int i=0; i<N_WAG; i++)
       if (wagSw[i] != avoidSw && testSwLC(wagL[i], wagC[i], wagSw[i]) < 999) {
          // Found a hill, try hill climbing to the top
-         for (int dist = 64; dist; dist /= 2)
-            hillClimb(ind, cap, dist);
+         // TODO - this still produces less than ideal results when navigating on a narrow ridge, need ideas
+         hillClimb(ind, cap, 48);
+         hillClimb(ind, cap, 32);
+         hillClimb(ind, cap, 24);
+         hillClimb(ind, cap, 16);
+         hillClimb(ind, cap, 12);
+         hillClimb(ind, cap, 8);
+         hillClimb(ind, cap, 6);
+         hillClimb(ind, cap, 4);
+         hillClimb(ind, cap, 3);
+         hillClimb(ind, cap, 2);
+         hillClimb(ind, cap, 1);
+            
          if (SWR < 120 || avoidSw != 2) 
             break;
          // tried this cap switch side, limit search to other side
