@@ -1,7 +1,4 @@
-// ATU-10 QRP 10 watts automatic antenna tuner with AD8361 true RMS detectors
-// David Fainitski, N7DDC
-// 2020, 2022
-
+// ATU-10 tuning algorithm, prototype Tom Court, AC0NY
 
 // test stubs imiplemented in impedance.c
 extern void delay_ms(int ms);
@@ -33,11 +30,11 @@ char wagL[N_WAG] = {44,47,9,61,5,37,11,25,54,17,3,9,56,12,3,99,15,12,24,25,10,26
 char wagC[N_WAG] = {35,44,3,7,2,2,120,3,6,13,1,1,1,120,3,11,7,1,8,13,2,4,19,1,1,1,1,26,5,1,3,7,14,2,5,1,2,15,4,1,1,10,1,8,3,1,1,9,31,15,7,1,2,1,2,3,22,13,10,8,2,4,2,5,5,8,1,1,4,1,2};
 
 
-int testSwLC(char sw, char l, char c)
+int testSwLC(char l, char c, char sw)
 {
-   SW = sw;
    ind = l;
    cap = c;
+   SW = sw;
    Relay_set(ind, cap, SW);
    Delay_ms(5);
    get_SWR();
@@ -51,13 +48,13 @@ void hillClimb(char l, char c, char dist)
    int swr[5] = {1000, 1000, 1000, 1000, 0};
    swr[4] = SWR;
    if (l-dist >= 0)
-      swr[0] = testSwLC(SW, l-dist, c);
+      swr[0] = testSwLC(l-dist, c, SW);
    if (l+dist < 128)
-      swr[1] = testSwLC(SW, l+dist, c);
+      swr[1] = testSwLC(l+dist, c, SW);
    if (c-dist >= 0)
-      swr[2] = testSwLC(SW, l, c-dist);
+      swr[2] = testSwLC(l, c-dist, SW);
    if (c+dist < 128)
-      swr[3] = testSwLC(SW, l, c+dist);
+      swr[3] = testSwLC(l, c+dist, SW);
    
    // find lowest in all 4 cardinal directions (and original)
    int lowest = 1001;
@@ -86,20 +83,23 @@ void tune(void) {
    char saveCap;
    int saveSWR = 1001;
    for (int i=0; i<N_WAG; i++)
-      if (wagSw[i] != avoidSw && testSwLC(wagSw[i], wagL[i], wagC[i]) < 999) {
+      if (wagSw[i] != avoidSw && testSwLC(wagL[i], wagC[i], wagSw[i]) < 999) {
+         // Found a hill, try hill climbing to the top
          for (int dist = 64; dist; dist /= 2)
             hillClimb(ind, cap, dist);
-         if (SWR < 120) 
+         if (SWR < 120 || avoidSw != 2) 
             break;
          // tried this cap switch side, limit search to other side
-         avoidSw = SW;
-         saveInd = ind;
-         saveCap = cap;
-         saveSWR = SWR;
+         if (avoidSw == 2) {
+            avoidSw = SW;
+            saveInd = ind;
+            saveCap = cap;
+            saveSWR = SWR;
+         }
       }
    // need to tune back to best found
    if (saveSWR < SWR)
-      testSwLC(avoidSw, saveInd, saveCap);
+      testSwLC(saveInd, saveCap, avoidSw);
    else
-      testSwLC(SW, ind, cap);
+      testSwLC(ind, cap, SW);
 }
