@@ -44,20 +44,29 @@ int _getch(void) {
 #define NATIVE sizeof(freqs)/sizeof(double)
 
 
+typedef struct {
+    char sw;
+    char l;
+    char c;
+} relay_t;
+
+
 double freqs[] = {1.82E6, 3.54E6, 7.02E6, 14.1E6, 18.1E6, 21.4E6, 24.9E6, 28.3E6};
 double resistances[21];
 double reactances[41];
 int capacitors[128];
 int inductors[128];
 
-double bestSWRs[N_FREQS][N_RESISTANCES][N_REACTANCES];
-double tunedSWRs[2][N_FREQS][N_RESISTANCES][N_REACTANCES];
-double nativeSWRs[N_RESISTANCES][N_REACTANCES];
+float allSWRs[N_FREQS][N_RESISTANCES][N_REACTANCES][2][128][128];
+relay_t bestRelays[N_FREQS][N_RESISTANCES][N_REACTANCES];
+float bestSWRs[N_FREQS][N_RESISTANCES][N_REACTANCES];
+float tunedSWRs[2][N_FREQS][N_RESISTANCES][N_REACTANCES];
+float nativeSWRs[N_RESISTANCES][N_REACTANCES];
 int tuneCounts[2][N_FREQS][N_RESISTANCES][N_REACTANCES];
 int digitMap[N_RESISTANCES][N_REACTANCES];
 int histogram[12];      // [0] = '-' for < 0        [11] = '+' for >= 10
 double scale[] = {0.1, 0.2, 0.5, 1.0};
-double tunedMapSWR[2][128][128];
+float tunedMapSWR[2][128][128];
 char tunedMapHit[2][128][128]; 
 
 
@@ -126,25 +135,6 @@ double complex ZhpLsd(double freq, double complex Zin, int L, int C)
 }
 
 
-double exaustiveSearch(double freq, double complex Zin)
-{
-    double smallest = INFINITY;
-    for (int linx=0; linx<sizeof(inductors)/sizeof(int); linx++) {
-        for (int cinx=0; cinx<sizeof(capacitors)/sizeof(int); cinx++) {
-            double swr = calcSWR(ZhpLsu(freq, Zin, inductors[linx], capacitors[cinx]));
-            if (swr < smallest)
-                smallest = swr;
-            assert(swr >= 1);
-            swr = calcSWR(ZhpLsd(freq, Zin, inductors[linx], capacitors[cinx]));
-            if (swr < smallest)
-                smallest = swr;
-            assert(swr >=1);
-        }
-    }
-    return smallest;
-}
-
-
 extern int SWR;
 extern char ind, cap, SW;
 double complex tuneImp = 50.0;
@@ -171,19 +161,22 @@ void get_SWR()
 
 void Relay_set(char l, char c, char i)
 {
-    assert(l >= 0);
-    assert(c >= 0);
+    // assert(l >= 0);
+    // assert(c >= 0);
+    l &= 127; 
+    c &= 127;
+    i &= 1;
     if (i) // TODO - which side should the C be on the LC?, guessing for now, probably doesn't matter
         SWRexact = calcSWR(ZhpLsu(tuneFreq, tuneImp, inductors[l], capacitors[c]));
     else
         SWRexact = calcSWR(ZhpLsd(tuneFreq, tuneImp, inductors[l], capacitors[c]));
 
     tuneCount++;
-    tunedMapHit[i][l][c]++;
     lastTuneC = c;
     lastTuneL = l;
     lastTuneCsw = i;
-}
+    tunedMapHit[lastTuneCsw][lastTuneL][lastTuneC]++;
+ }
 
 
 void resetTune(double freq, double complex Zin)
@@ -196,6 +189,188 @@ void resetTune(double freq, double complex Zin)
     SW = 0;
     SWR = 999;
     SWRexact = 10;
+}
+
+
+void viewHighestHit()
+{
+    int xsize = 64, ysize = 32;
+    int lcsize = 128, isAll = 0;;
+    int xoff = 0, yoff = 0, capsw = 0;
+    int sinx = 0, zoom = 4;
+    int highestHit[2][128][128];
+    int allHit[2][128][128];
+    int highestCount = 0;
+    char skips[N_FREQS][N_RESISTANCES][N_REACTANCES];
+
+    memset(highestHit, 0, sizeof(highestHit));
+    memset(allHit, 0, sizeof(allHit));
+    memset(skips, 0, sizeof(skips));
+   
+    // Find 1st, 2nd, 3rd etc. LC most likely to be <10 SWR
+    printf(ANSI_CLEAR_SCREEN_AND_HOME); 
+    printf("Sw\tL\tC\tcount\n");
+    for (highestCount=0; highestCount<100; highestCount++) {
+        int highCount = 0;
+        relay_t highRelay;
+        for (int s=0; s<2; s++) {
+            for (int l=0; l<128; l++) {
+                for (int c=0; c<128; c++) {
+                    // for every relay configuration, find out a count of rr test points will hill climb
+                    int count = 0;
+                    for (int f=0; f<N_FREQS; f++) 
+                        for (int r=0; r<N_RESISTANCES; r++) 
+                            for (int j=0; j<N_REACTANCES; j++)
+                                if (!skips[f][r][j] && bestRelays[f][r][j].sw == s)
+                                    if (allSWRs[f][r][j][s][l][c] < 10.0 && allSWRs[f][r][j][s][l][c] > 0)
+                                        count++;
+                    if (count > highCount) {
+                        highCount = count;
+                        highRelay.sw = s;
+                        highRelay.l = l;
+                        highRelay.c = c;
+                    }
+                }
+            }
+        }
+        if (highCount == 0)
+            break;
+        highestHit[highRelay.sw][highRelay.l][highRelay.c] = highCount;   
+        printf("%d\t%d\t%d\t%d\n", highRelay.sw, highRelay.l, highRelay.c, highCount);
+        // The LC point found covers all others that have a SWR < 10, so skip those in the succeeding iterations
+        for (int f=0; f<N_FREQS; f++) 
+            for (int r=0; r<N_RESISTANCES; r++) 
+                for (int j=0; j<N_REACTANCES; j++)
+                    if (bestRelays[f][r][j].sw == highRelay.sw)
+                        if (allSWRs[f][r][j][highRelay.sw][highRelay.l][highRelay.c] < 10.0 && allSWRs[f][r][j][highRelay.sw][highRelay.l][highRelay.c] > 0)
+                            skips[f][r][j] = 1;
+    }
+    
+    for (int s=0; s<2; s++) 
+        for (int l=0; l<128; l++) 
+            for (int c=0; c<128; c++) 
+                 for (int f=0; f<N_FREQS; f++) 
+                    for (int r=0; r<N_RESISTANCES; r++) 
+                        for (int j=0; j<N_REACTANCES; j++)
+                            if (allSWRs[f][r][j][s][l][c] < 10.0 && allSWRs[f][r][j][s][l][c] > 0)
+                                allHit[s][l][c]++;                                
+ 
+     printf("press a key\n");
+    _getch();
+
+    for (;;) {
+        if (zoom == 4)
+            xsize = 32;
+        else
+            xsize = 64;
+       if (xoff < 0)
+            xoff = 0;
+        if (yoff < 0)
+            yoff = 0;
+        if (xoff > lcsize-xsize*zoom)
+            xoff = lcsize-xsize*zoom;
+        if (yoff > lcsize-ysize*zoom)
+            yoff = lcsize-ysize*zoom;
+
+        double curScale = scale[sinx] * 10;
+        printf(ANSI_CLEAR_SCREEN_AND_HOME); 
+        printf("y=%d, x=%d, cSw=%d, zoom=%d    count=%d\n", yoff, xoff, capsw, zoom, highestCount);
+        for (int y=yoff, r=0; y<yoff+ysize*zoom; y+=zoom, r++) {
+            for (int x=xoff; x<xoff+xsize*zoom; x+=zoom) {
+                // sum values in zoom x zoom square
+                double hi = 0;
+                for (int y1=y; y1<y+zoom; y1++) 
+                    for (int x1=x; x1<x+zoom; x1++) {
+                        double t;
+                        if (isAll)
+                            t = allHit[capsw][y1][x1] / 50.0;
+                        else
+                            t = highestHit[capsw][y1][x1];
+                        if (t > hi)
+                            hi = t;
+                    }
+                int n = (int)floor(hi / curScale);
+                printf("%c", (n < 10) ? ('0' + n) : '+');
+             }
+            const char *format = "  %c =%c%4.1f%c";
+            if (r < 10)
+                printf(format, '0'+r, ' ', curScale*r*(isAll?50:1), '+');
+            else if (r == 10)
+                printf(format, '+', ' ',  curScale*r*(isAll?50:1), '+');
+
+            switch(r)
+            {
+            case 12:    printf("  SCROLL");                                         break;
+            case 13:    printf("    "  ANSI_HIGHLIGHT "i" ANSI_NORMAL);             break;
+            case 14:    printf("  " ANSI_HIGHLIGHT "j" ANSI_NORMAL " + " ANSI_HIGHLIGHT "k" ANSI_NORMAL);   break;
+            case 15:    printf("    "  ANSI_HIGHLIGHT "m" ANSI_NORMAL);             break;
+            case 17:    printf("  PAGE");                                           break;
+            case 18:    printf("    "  ANSI_HIGHLIGHT "I" ANSI_NORMAL);             break;
+            case 19:    printf("  " ANSI_HIGHLIGHT "J" ANSI_NORMAL " + " ANSI_HIGHLIGHT "K" ANSI_NORMAL);   break;
+            case 20:    printf("    "  ANSI_HIGHLIGHT "M" ANSI_NORMAL);             break;
+            case 22:    printf("  "    ANSI_HIGHLIGHT "c" ANSI_NORMAL "ap switch"); break;
+            case 23:    printf("  "    ANSI_HIGHLIGHT "z" ANSI_NORMAL "oom+");      break;
+            case 24:    printf("  "    ANSI_HIGHLIGHT "Z" ANSI_NORMAL "oom-");      break;
+            case 25:    printf("  "    ANSI_HIGHLIGHT "s" ANSI_NORMAL "cale+");     break; 
+            case 26:    printf("  "    ANSI_HIGHLIGHT "s" ANSI_NORMAL "cale-");     break; 
+            case 27:    printf("  "    ANSI_HIGHLIGHT "a" ANSI_NORMAL "ll");        break;        
+            case 28:    printf("  "    ANSI_HIGHLIGHT "q" ANSI_NORMAL "uit");       break;
+            }
+            printf("\n");
+        }
+
+        char ch = _getch();
+        switch (ch) {
+            case 'c':
+                capsw = !capsw;
+                break;
+            case 'i': 
+                yoff -= zoom;
+                break;
+            case 'I': 
+                yoff -= ysize*zoom/2;
+                break;
+            case 'm':
+                yoff += zoom;
+                break;
+            case 'M':
+                yoff += ysize*zoom/2;
+                break;
+            case 'j': 
+                xoff -= zoom;
+                break;
+            case 'J': 
+                xoff -= xsize*zoom/2;
+                break;
+            case 'k':
+                xoff += zoom;
+                break;
+            case 'K':
+                xoff += xsize*zoom/2;
+                break;
+            case 'S':
+                if (--sinx < 0)
+                    sinx = sizeof(scale)/sizeof(double) - 1;
+                break;
+            case 's':
+                if (++sinx >= sizeof(scale)/sizeof(double))
+                    sinx = 0;   
+                break;
+            case 'q':
+                return;
+            case 'z':
+                if (zoom < 4)
+                    zoom *= 2;
+                break;
+           case 'Z':
+                if (zoom > 1)
+                    zoom /= 2;
+                break;
+            case 'a':
+                isAll = !isAll;
+                break;
+        }
+     }
 }
 
 
@@ -231,6 +406,15 @@ retune:
             xsize = 32;
         else
             xsize = 64;
+       if (xoff < 0)
+            xoff = 0;
+        if (yoff < 0)
+            yoff = 0;
+        if (xoff > lcsize-xsize*zoom)
+            xoff = lcsize-xsize*zoom;
+        if (yoff > lcsize-ysize*zoom)
+            yoff = lcsize-ysize*zoom;
+
         double curScale = scale[sinx];
         printf(ANSI_CLEAR_SCREEN_AND_HOME); 
         printf("y=%d, x=%d, cSw=%d, zoom=%d   %.1f%+.1fj   tunes=%d   #=%.2f SWR\n", yoff, xoff, capsw, zoom, creal(Zin), cimag(Zin), tuneCount, SWR/100.0);
@@ -360,15 +544,7 @@ retune:
                     zoom /= 2;
                 break;
         }
-        if (xoff < 0)
-            xoff = 0;
-        if (yoff < 0)
-            yoff = 0;
-        if (xoff > lcsize-xsize*zoom)
-            xoff = lcsize-xsize*zoom;
-        if (yoff > lcsize-ysize*zoom)
-            yoff = lcsize-ysize*zoom;
-    }
+     }
 }
 
 
@@ -482,12 +658,13 @@ void viewResistReactMaps()
 
             switch (r)
             {
-                case 13:   printf("    " ANSI_HIGHLIGHT "f" ANSI_NORMAL "requency+");  break;
-                case 14:   printf("    " ANSI_HIGHLIGHT "F" ANSI_NORMAL "requency-");  break;
-                case 15:   printf("    " ANSI_HIGHLIGHT "g" ANSI_NORMAL "raph+");      break;
-                case 16:   printf("    " ANSI_HIGHLIGHT "G" ANSI_NORMAL "raph+");      break;
-                case 17:   printf("    " ANSI_HIGHLIGHT "s" ANSI_NORMAL "cale+");       break;
-                case 18:   printf("    " ANSI_HIGHLIGHT "S" ANSI_NORMAL "cale-");       break;
+                case 12:   printf("    " ANSI_HIGHLIGHT "f" ANSI_NORMAL "requency+");  break;
+                case 13:   printf("    " ANSI_HIGHLIGHT "F" ANSI_NORMAL "requency-");  break;
+                case 14:   printf("    " ANSI_HIGHLIGHT "g" ANSI_NORMAL "raph+");      break;
+                case 15:   printf("    " ANSI_HIGHLIGHT "G" ANSI_NORMAL "raph+");      break;
+                case 16:   printf("    " ANSI_HIGHLIGHT "s" ANSI_NORMAL "cale+");       break;
+                case 17:   printf("    " ANSI_HIGHLIGHT "S" ANSI_NORMAL "cale-");       break;
+                case 18:   printf("    " ANSI_HIGHLIGHT "b" ANSI_NORMAL "attleship");   break;
                 case 19:   printf("    " ANSI_HIGHLIGHT "1" ANSI_NORMAL "tune");        break;
                 case 20:   printf("    " ANSI_HIGHLIGHT "2" ANSI_NORMAL "tune");        break;
             }
@@ -536,6 +713,9 @@ void viewResistReactMaps()
                 if (++graph >= sizeof(graphs)/sizeof(graphs[0]))
                     graph = 0;
                 break;
+            case 'b':
+                viewHighestHit();
+                break;
             case '1':
                 zoom = 1;
                 break;
@@ -573,22 +753,45 @@ int main()
     for (int f=0; f<N_FREQS; f++) 
         for (int r=0; r<N_RESISTANCES; r++) 
             for (int j=0; j<N_REACTANCES; j++) 
-                bestSWRs[f][r][j]  = exaustiveSearch(freqs[f], resistances[r]+I*reactances[j]);
+                for (int l=0; l<128; l++)
+                    for (int c=0; c<128; c++) {
+                        double complex Zin = resistances[r]+I*reactances[j];
+                        allSWRs[f][r][j][0][l][c] = calcSWR(ZhpLsu(freqs[f], Zin, inductors[l], capacitors[c]));
+                        allSWRs[f][r][j][1][l][c] = calcSWR(ZhpLsd(freqs[f], Zin, inductors[l], capacitors[c]));
+                    }
 
-   for (int i=0; i<N_FREQS; i++) {
+    for (int f=0; f<N_FREQS; f++) 
+        for (int r=0; r<N_RESISTANCES; r++) 
+            for (int j=0; j<N_REACTANCES; j++) {
+                float smallest = INFINITY;
+                relay_t relay;
+                for (int s=0; s<2; s++)
+                    for (int l=0; l<128; l++)
+                        for (int c=0; c<128; c++)
+                            if (allSWRs[f][r][j][s][l][c] < smallest) {
+                                smallest = allSWRs[f][r][j][s][l][c];
+                                relay.c = c;
+                                relay.l = l;
+                                relay.sw = s;
+                            }
+                bestSWRs[f][r][j]  = smallest;
+                bestRelays[f][r][j] = relay;
+            }
+
+    for (int f=0; f<N_FREQS; f++) {
         for (int r=0; r<N_RESISTANCES; r++) {
             for (int j=0; j<N_REACTANCES; j++) {
-                resetTune(freqs[i], resistances[r]+I*reactances[j]);
+                resetTune(freqs[f], resistances[r]+I*reactances[j]);
                 extern void tune1();
                 tune1(); 
-                tunedSWRs[0][i][r][j] = SWRexact;
-                tuneCounts[0][i][r][j] = tuneCount;
+                tunedSWRs[0][f][r][j] = SWRexact;
+                tuneCounts[0][f][r][j] = tuneCount;
 
-                resetTune(freqs[i], resistances[r]+I*reactances[j]);
+                resetTune(freqs[f], resistances[r]+I*reactances[j]);
                 extern void tune2();
                 tune2(); 
-                tunedSWRs[1][i][r][j] = SWRexact;
-                tuneCounts[1][i][r][j] = tuneCount;
+                tunedSWRs[1][f][r][j] = SWRexact;
+                tuneCounts[1][f][r][j] = tuneCount;
             }
         }
     }

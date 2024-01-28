@@ -17,14 +17,6 @@ extern void Relay_set(char L, char C, char I);
 
 
 void tune(void);
-static void subtune(void);
-static void coarse_tune(void);
-static void coarse_cap(void);
-static void coarse_ind(void);
-static void coarse_ind_cap(void);
-static void sharp_tune(void);
-static void sharp_cap(void);
-static void sharp_ind(void);
 
 
 // The following code is pulled from main.c unmodified. Just the stuff that is needed to test tuning.
@@ -34,293 +26,80 @@ static void sharp_ind(void);
 extern int SWR;
 extern char ind, cap, SW;
 
+// Wild a$$ guesses, in order of most likely to least likely to hit
+#define N_WAG 71
+char wagSw[N_WAG] = {1,0,1,0,1,1,1,0,1,0,0,1,1,0,1,1,1,1,0,1,0,0,0,1,1,1,1,1,1,1,1,1,1,1,0,1,1,1,1,1,1,0,1,1,0,1,1,1,0,0,1,1,0,1,1,1,1,1,1,1,0,0,1,1,0,0,1,1,1,1,1};
+char wagL[N_WAG] = {44,47,9,61,5,37,11,25,54,17,3,9,56,12,3,99,15,12,24,25,10,26,27,22,7,124,8,64,2,15,26,43,64,81,16,5,14,17,78,10,30,8,6,32,3,13,19,125,9,11,10,16,3,4,6,28,41,72,95,118,48,72,12,55,1,26,3,11,16,32,46};
+char wagC[N_WAG] = {35,44,3,7,2,2,120,3,6,13,1,1,1,120,3,11,7,1,8,13,2,4,19,1,1,1,1,26,5,1,3,7,14,2,5,1,2,15,4,1,1,10,1,8,3,1,1,9,31,15,7,1,2,1,2,3,22,13,10,8,2,4,2,5,5,8,1,1,4,1,2};
 
 
-//
-void tune(void){
-   int SWR_mem;
-   char cap_mem, ind_mem;
-   subtune();
-   get_SWR();
-   if(SWR<=120) return;
-   SWR_mem = SWR;
-   cap_mem = cap;
-   ind_mem = ind;
-   if(SW==1) SW = 0;
-   else SW = 1;
-   subtune();
-   get_SWR();
-   if(SWR>SWR_mem){
-      if(SW==1) SW = 0;
-      else SW = 1;
-      cap = cap_mem;
-      ind = ind_mem;
-      Relay_set(ind, cap, SW);
-      Delay_ms(5);
-      get_SWR();
-   }
-   if(SWR<=120) return;
-   sharp_tune();
-   get_SWR();
-   return;
-}
-
-//
-static void subtune(void){
-   cap = 0;
-   ind = 0;
+int testSwLC(char sw, char l, char c)
+{
+   SW = sw;
+   ind = l;
+   cap = c;
    Relay_set(ind, cap, SW);
-   delay_ms(50);
+   Delay_ms(5);
    get_SWR();
-   if(SWR<=120) return;
-   coarse_tune();
-   get_SWR();
-   if(SWR<=120) return;
-   sharp_tune();
-   return;
+   return SWR;
 }
 
-//
-static void coarse_tune(void){
-   int SWR_mem1 = 10000, SWR_mem2 = 10000, SWR_mem3 = 10000;
-   char ind_mem1, cap_mem1, ind_mem2, cap_mem2, ind_mem3, cap_mem3;
-   coarse_cap();
-   coarse_ind();
-   get_SWR();
-   if(SWR<=120) return;
-   SWR_mem1 = SWR;
-   ind_mem1 = ind;
-   cap_mem1 = cap;
-   if(cap<=2 & ind<=2){
-      cap = 0;
-      ind = 0;
-      Relay_set(ind, cap, SW);
-      Delay_ms(5);
-      coarse_ind();
-      coarse_cap();
-      get_SWR();
-      if(SWR<=120) return;
-      SWR_mem2 = SWR;
-      ind_mem2 = ind;
-      cap_mem2 = cap;
-   }
-   if(cap<=2 & ind<=2){
-      cap = 0;
-      ind = 0;
-      Relay_set(ind, cap, SW);
-      Delay_ms(5);
-      coarse_ind_cap();
-      get_SWR();
-      if(SWR<=120) return;
-      SWR_mem3 = SWR;
-      ind_mem3 = ind;
-      cap_mem3 = cap;
-   }
-   if(SWR_mem1<=SWR_mem2 & SWR_mem1<=SWR_mem3){
-      cap = cap_mem1;
-      ind = ind_mem1;
-   }
-   else if(SWR_mem2<=SWR_mem1 & SWR_mem2<=SWR_mem3){
-      cap = cap_mem2;
-      ind = ind_mem2;
-   }
-   else if(SWR_mem3<=SWR_mem1 & SWR_mem3<=SWR_mem2){
-      cap = cap_mem3;
-      ind = ind_mem3;
-   }
-   return;
-}
 
-//
-static void coarse_ind_cap(void){
-   int SWR_mem;
-   char ind_mem;
-   ind_mem = 0;
-   get_swr();
-   SWR_mem = SWR / 10;
-   for(ind=1; ind<64; ind*=2){
-      Relay_set(ind, ind, SW);
-      Delay_ms(5);
-      get_swr();
-      SWR = SWR/10;
-      if(SWR<=SWR_mem){
-         ind_mem = ind;
-         SWR_mem = SWR;
+void hillClimb(char l, char c, char dist)
+{
+   // try tuning to all 4 cardinal directions, but don't run off edge
+   int swr[5] = {1000, 1000, 1000, 1000, 0};
+   swr[4] = SWR;
+   if (l-dist >= 0)
+      swr[0] = testSwLC(SW, l-dist, c);
+   if (l+dist < 128)
+      swr[1] = testSwLC(SW, l+dist, c);
+   if (c-dist >= 0)
+      swr[2] = testSwLC(SW, l, c-dist);
+   if (c+dist < 128)
+      swr[3] = testSwLC(SW, l, c+dist);
+   
+   // find lowest in all 4 cardinal directions (and original)
+   int lowest = 1001;
+   int inx = 0;
+   for (int i=0; i<5; i++)
+      if (swr[i] < lowest) {
+         lowest = swr[i];
+         inx = i;
       }
-      else
-         break;
+
+   // setup  for lowest
+   SWR = swr[inx];
+   switch (inx) {
+   case 0:  ind = l-dist;   cap = c;      break;
+   case 1:  ind = l+dist;   cap = c;      break;
+   case 2:  ind = l;        cap = c-dist; break;
+   case 3:  ind = l;        cap = c+dist; break;
+   case 4:  ind = l;        cap = c;      break;
    }
-   ind = ind_mem;
-   cap = ind_mem;
-   Relay_set(ind, cap, SW);
-   Delay_ms(5);
-   return;
 }
 
-//
-static void coarse_cap(void){
-   int SWR_mem;
-   char cap_mem;
-   cap_mem = 0;
-   get_swr();
-   SWR_mem = SWR / 10;
-   for(cap=1; cap<64; cap*=2){
-      Relay_set(ind, cap, SW);
-      Delay_ms(5);
-      get_swr();
-      SWR = SWR/10;
-      if(SWR<=SWR_mem){
-         cap_mem = cap;
-         SWR_mem = SWR;
-      }
-      else
-         break;
-   }
-   cap = cap_mem;
-   Relay_set(ind, cap, SW);
-   Delay_ms(5);
-   return;
-}
 
-//
-static void coarse_ind(void){
-   int SWR_mem;
-   char ind_mem;
-   ind_mem = 0;
-   get_swr();
-   SWR_mem = SWR / 10;
-   for(ind=1; ind<64; ind*=2){
-      Relay_set(ind, cap, SW);
-      Delay_ms(5);
-      get_swr();
-      SWR = SWR/10;
-      if(SWR<=SWR_mem){
-         ind_mem = ind;
-         SWR_mem = SWR;
-      }
-      else
-         break;
-   }
-   ind = ind_mem;
-   Relay_set(ind, cap, SW);
-   Delay_ms(5);
-   return;
-}
-
-//
-static void sharp_tune(void){
-   if(cap>=ind){
-      sharp_cap();
-      sharp_ind();
-   }
-   else{
-      sharp_ind();
-      sharp_cap();
-   }
-   return;
-}
-
-//
-static void sharp_cap(void){
-   int SWR_mem;
-   char step, cap_mem;
-   cap_mem = cap;
-   step = cap / 10;
-   if(step==0) step = 1;
-   get_SWR();
-   SWR_mem = SWR;
-   cap += step;
-   Relay_set(ind, cap, SW);
-   Delay_ms(5);
-   get_SWR();
-   if(SWR<=SWR_mem){
-      SWR_mem = SWR;
-      cap_mem = cap;
-      for(cap+=step; cap<=(127-step); cap+=step){
-         Relay_set(ind, cap, SW);
-         Delay_ms(5);
-         get_SWR();
-         if(SWR<=SWR_mem){
-            cap_mem = cap;
-            SWR_mem = SWR;
-            step = cap / 10;
-            if(step==0) step = 1;
-         }
-         else
+void tune(void) {
+   char avoidSw = 2;
+   char saveInd;
+   char saveCap;
+   int saveSWR = 1001;
+   for (int i=0; i<N_WAG; i++)
+      if (wagSw[i] != avoidSw && testSwLC(wagSw[i], wagL[i], wagC[i]) < 999) {
+         for (int dist = 64; dist; dist /= 2)
+            hillClimb(ind, cap, dist);
+         if (SWR < 120) 
             break;
+         // tried this cap switch side, limit search to other side
+         avoidSw = SW;
+         saveInd = ind;
+         saveCap = cap;
+         saveSWR = SWR;
       }
-   }
-   else{
-      SWR_mem = SWR;
-      for(cap-=step; cap>=step; cap-=step){
-         Relay_set(ind, cap, SW);
-         Delay_ms(5);
-         get_SWR();
-         if(SWR<=SWR_mem){
-            cap_mem = cap;
-            SWR_mem = SWR;
-            step = cap / 10;
-            if(step==0) step = 1;
-         }
-         else
-            break;
-      }
-   }
-   cap = cap_mem;
-   Relay_set(ind, cap, SW);
-   Delay_ms(5);
-   return;
+   // need to tune back to best found
+   if (saveSWR < SWR)
+      testSwLC(avoidSw, saveInd, saveCap);
+   else
+      testSwLC(SW, ind, cap);
 }
-
-//
-static void sharp_ind(void){
-   int SWR_mem;
-   char step, ind_mem;
-   ind_mem = ind;
-   step = ind / 10;
-   if(step==0) step = 1;
-   get_SWR();
-   SWR_mem = SWR;
-   ind += step;
-   Relay_set(ind, cap, SW);
-   Delay_ms(5);
-   get_SWR();
-   if(SWR<=SWR_mem){
-      SWR_mem = SWR;
-      ind_mem = ind;
-      for(ind+=step; ind<=(127-step); ind+=step){
-         Relay_set(ind, cap, SW);
-         Delay_ms(5);
-         get_SWR();
-         if(SWR<=SWR_mem){
-            ind_mem = ind;
-            SWR_mem = SWR;
-            step = ind / 10;
-            if(step==0) step = 1;
-         }
-         else
-            break;
-      }
-   }
-   else{
-      SWR_mem = SWR;
-      for(ind-=step; ind>=step; ind-=step){
-         Relay_set(ind, cap, SW);
-         Delay_ms(5);
-         get_SWR();
-         if(SWR<=SWR_mem){
-            ind_mem = ind;
-            SWR_mem = SWR;
-            step = ind / 10;
-            if(step==0) step = 1;
-         }
-         else
-            break;
-      }
-   }
-   ind = ind_mem;
-   Relay_set(ind, cap, SW);
-   Delay_ms(5);
-   return;
-}
-//
