@@ -2,21 +2,15 @@
 // David Fainitski, N7DDC
 // 2020, 2022
 
+#include "tune.h"
 
-// test stubs imiplemented in impedance.c
-extern void delay_ms(int ms);
-extern void get_SWR();
-extern void Relay_set(char L, char C, char I);
+// this allows us to have two 'tune' functions, an old one here and another new one in tune2.c
+#define tune() tune1()
 
 // hack for case insentive linking in function names
 #define get_swr get_SWR
 #define Delay_ms delay_ms
 
-// this allows us to have two 'tune' functions, an old one here and another new one in tune2.c
-#define tune(A) tune1(A)
-
-
-void tune(void);
 static void subtune(void);
 static void coarse_tune(void);
 static void coarse_cap(void);
@@ -27,16 +21,8 @@ static void sharp_cap(void);
 static void sharp_ind(void);
 
 
-// The following code is pulled from main.c unmodified. Just the stuff that is needed to test tuning.
-// static was added to all functions except 'tune' to allow linking two copies of the tuning algorithm.
-
-int SWR;
-char ind = 0, cap = 0, SW = 0;
-
-
-
 //
-void tune(void){
+void tune(){
    int SWR_mem;
    char cap_mem, ind_mem;
    subtune();

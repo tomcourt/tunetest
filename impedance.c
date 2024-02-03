@@ -5,6 +5,7 @@
 #include <math.h>
 #include <complex.h>
 #include <assert.h>
+#include "tune.h"
 extern int _getch();
 
 // Fow Windows only, to allow console to use ANSI, add the following to the Registry
@@ -34,8 +35,9 @@ int _getch(void) {
 
 
 #define ANSI_CLEAR_SCREEN_AND_HOME "\033[2J\033[H"
-// #define ANSI_HIGHLIGHT "\033[30;47m"         // gray background
+// #define ANSI_HIGHLIGHT "\033[30;47m"      // gray background
 #define ANSI_HIGHLIGHT "\033[7m"             // reverse video
+// #define ANSI_NEGATIVE "\033[31m"             // red text
 #define ANSI_NORMAL "\033[0m"
 
 #define N_RESISTANCES sizeof(resistances)/sizeof(double)
@@ -50,6 +52,9 @@ typedef struct {
     char c;
 } relay_t;
 
+
+int SWR;
+char ind, cap, SW;
 
 double freqs[] = {1.82E6, 3.54E6, 7.02E6, 14.1E6, 18.1E6, 21.4E6, 24.9E6, 28.3E6};
 double resistances[21];
@@ -68,6 +73,7 @@ int histogram[12];      // [0] = '-' for < 0        [11] = '+' for >= 10
 double scale[] = {0.1, 0.2, 0.5, 1.0};
 float tunedMapSWR[2][128][128];
 char tunedMapHit[2][128][128]; 
+int showTuning = 0;
 
 
 int calc_capacitors(int values)
@@ -143,9 +149,11 @@ double SWRexact = 1.0;
 int tuneCount;
 int lastTuneC, lastTuneL, lastTuneCsw;
 
+
 void delay_ms(int ms)
 {
 }
+
 
 void get_SWR()
 { 
@@ -159,6 +167,7 @@ void get_SWR()
     }
 }
 
+
 void Relay_set(char l, char c, char i)
 {
     // assert(l >= 0);
@@ -170,6 +179,13 @@ void Relay_set(char l, char c, char i)
         SWRexact = calcSWR(ZhpLsu(tuneFreq, tuneImp, inductors[l], capacitors[c]));
     else
         SWRexact = calcSWR(ZhpLsd(tuneFreq, tuneImp, inductors[l], capacitors[c]));
+
+    if (showTuning) {
+        int s = (int)(100.0 * SWRexact + 0.5);
+        if (s > 999)
+            s = 999;
+        printf("%2d %2d %d = %d\n", l, c, i, s);
+    }
 
     tuneCount++;
     lastTuneC = c;
@@ -206,6 +222,7 @@ void viewHighestHit()
     memset(highestHit, 0, sizeof(highestHit));
     memset(allHit, 0, sizeof(allHit));
     memset(skips, 0, sizeof(skips));
+
    
     // Find 1st, 2nd, 3rd etc. LC most likely to be <10 SWR
     printf(ANSI_CLEAR_SCREEN_AND_HOME); 
@@ -396,10 +413,18 @@ retune:
     memset(tunedMapHit, 0, sizeof(tunedMapHit));
     extern void tune1();
     extern void tune2();
+
+    printf(ANSI_CLEAR_SCREEN_AND_HOME);     
     if (tuneChoice == 1)
         tune1();
     else
-        tune2();    
+        tune2(); 
+    if (showTuning)
+    {
+        printf("press a key\n");
+        _getch();
+        showTuning = 0;  
+    }
     
     for (;;) {
         if (zoom == 4)
@@ -417,7 +442,7 @@ retune:
 
         double curScale = scale[sinx];
         printf(ANSI_CLEAR_SCREEN_AND_HOME); 
-        printf("y=%d, x=%d, cSw=%d, zoom=%d   %.1f%+.1fj   tunes=%d   #=%.2f SWR\n", yoff, xoff, capsw, zoom, creal(Zin), cimag(Zin), tuneCount, SWR/100.0);
+        printf("y=%d, x=%d, cSw=%d, zoom=%d   (%d,%d) %.1f%+.1fj   tunes=%d   #=%.2f SWR\n", yoff, xoff, capsw, zoom, resistanceInx, reactanceInx, creal(Zin), cimag(Zin), tuneCount, SWR/100.0);
         for (int y=yoff, r=0; y<yoff+ysize*zoom; y+=zoom, r++) {
             for (int x=xoff; x<xoff+xsize*zoom; x+=zoom) {
                 // find lowest value in zoom x zoom square
@@ -716,9 +741,13 @@ void viewResistReactMaps()
             case 'b':
                 viewHighestHit();
                 break;
+            case '!':
+                showTuning = 1;
             case '1':
                 zoom = 1;
                 break;
+            case '@':
+                showTuning = 1;
             case '2':
                 zoom = 2;
                 break;
