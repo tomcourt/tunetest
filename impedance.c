@@ -73,7 +73,6 @@ int histogram[12];      // [0] = '-' for < 0        [11] = '+' for >= 10
 double scale[] = {0.1, 0.2, 0.5, 1.0};
 float tunedMapSWR[2][128][128];
 char tunedMapHit[2][128][128]; 
-int showTuning = 0;
 
 
 int calc_capacitors(int values)
@@ -147,7 +146,8 @@ double complex tuneImp = 50.0;
 double tuneFreq = 0;
 double SWRexact = 1.0;
 int tuneCount;
-int lastTuneC, lastTuneL, lastTuneCsw;
+int tuneBreak;
+int lastTuneC, lastTuneL, lastTuneCsw, lastSWR;
 
 
 void delay_ms(int ms)
@@ -180,18 +180,14 @@ void Relay_set(char l, char c, char i)
     else
         SWRexact = calcSWR(ZhpLsd(tuneFreq, tuneImp, inductors[l], capacitors[c]));
 
-    if (showTuning) {
-        int s = (int)(100.0 * SWRexact + 0.5);
-        if (s > 999)
-            s = 999;
-        printf("%2d %2d %d = %d\n", l, c, i, s);
-    }
-
     tuneCount++;
-    lastTuneC = c;
-    lastTuneL = l;
-    lastTuneCsw = i;
-    tunedMapHit[lastTuneCsw][lastTuneL][lastTuneC]++;
+    if (tuneCount <= tuneBreak) {
+        lastTuneC = c;
+        lastTuneL = l;
+        lastTuneCsw = i;
+        lastSWR = SWR;
+        tunedMapHit[lastTuneCsw][lastTuneL][lastTuneC]++;
+    }
  }
 
 
@@ -399,6 +395,8 @@ void viewLCTuneMap(int tuneChoice, double freq, int resistanceInx, int reactance
     int sinx = 0, zoom = 4, relocate = 0;
     double complex Zin = 0;
 
+    tuneBreak = 999;
+
 retune:
     Zin = resistances[resistanceInx] + I*reactances[reactanceInx];
 
@@ -419,13 +417,7 @@ retune:
         tune1();
     else
         tune2(); 
-    if (showTuning)
-    {
-        printf("press a key\n");
-        _getch();
-        showTuning = 0;  
-    }
-    
+     
     for (;;) {
         if (zoom == 4)
             xsize = 32;
@@ -442,7 +434,11 @@ retune:
 
         double curScale = scale[sinx];
         printf(ANSI_CLEAR_SCREEN_AND_HOME); 
-        printf("y=%d, x=%d, cSw=%d, zoom=%d   (%d,%d) %.1f%+.1fj   tunes=%d   #=%.2f SWR\n", yoff, xoff, capsw, zoom, resistanceInx, reactanceInx, creal(Zin), cimag(Zin), tuneCount, SWR/100.0);
+        if (tuneBreak == 999)
+            printf("y=%d, x=%d, cSw=%d, zoom=%d   (%d,%d) %.1f%+.1fj   tunes=%d   #=%.2f SWR\n", yoff, xoff, capsw, zoom, resistanceInx, reactanceInx, creal(Zin), cimag(Zin), tuneCount, lastSWR/100.0);
+        else
+            printf("y=%d, x=%d, cSw=%d, zoom=%d   c=%d l=%d sw=%d   tunes=%d/%d   #=%.2f SWR\n", yoff, xoff, capsw, zoom, lastTuneC, lastTuneL, lastTuneCsw, tuneBreak, tuneCount, lastSWR/100.0);
+        
         for (int y=yoff, r=0; y<yoff+ysize*zoom; y+=zoom, r++) {
             for (int x=xoff; x<xoff+xsize*zoom; x+=zoom) {
                 // find lowest value in zoom x zoom square
@@ -487,13 +483,16 @@ retune:
             case 18:    printf("    "  ANSI_HIGHLIGHT "I" ANSI_NORMAL);             break;
             case 19:    printf("  " ANSI_HIGHLIGHT "J" ANSI_NORMAL " + " ANSI_HIGHLIGHT "K" ANSI_NORMAL);   break;
             case 20:    printf("    "  ANSI_HIGHLIGHT "M" ANSI_NORMAL);             break;
-            case 22:    printf("  "    ANSI_HIGHLIGHT "c" ANSI_NORMAL "ap switch"); break;
+            case 22:    printf("  "    ANSI_HIGHLIGHT "c" ANSI_NORMAL "ap switch~"); break;
             case 23:    printf("  "    ANSI_HIGHLIGHT "z" ANSI_NORMAL "oom+");      break;
             case 24:    printf("  "    ANSI_HIGHLIGHT "Z" ANSI_NORMAL "oom-");      break;
             case 25:    printf("  "    ANSI_HIGHLIGHT "s" ANSI_NORMAL "cale+");     break; 
-            case 26:    printf("  "    ANSI_HIGHLIGHT "s" ANSI_NORMAL "cale-");     break; 
-            case 27:    printf("  "    ANSI_HIGHLIGHT "r" ANSI_NORMAL "elocate");   break;
-            case 28:    printf("  "    ANSI_HIGHLIGHT "q" ANSI_NORMAL "uit");       break;
+            case 26:    printf("  "    ANSI_HIGHLIGHT "S" ANSI_NORMAL "cale-");     break; 
+            case 27:    printf("  "    ANSI_HIGHLIGHT "r" ANSI_NORMAL "elocate~");  break;
+            case 28:    printf("  "    ANSI_HIGHLIGHT "d" ANSI_NORMAL "debug~");    break;
+            case 29:    printf("  "    ANSI_HIGHLIGHT "n" ANSI_NORMAL "step+");     break;
+            case 30:    printf("  "    ANSI_HIGHLIGHT "N" ANSI_NORMAL "step-");     break;
+            case 31:    printf("  "    ANSI_HIGHLIGHT "q" ANSI_NORMAL "uit");       break;
             }
             printf("\n");
         }
@@ -568,6 +567,20 @@ retune:
                 if (zoom > 1)
                     zoom /= 2;
                 break;
+            case 'd':
+                if (tuneBreak == 999)
+                    tuneBreak = 0;
+                else
+                    tuneBreak = 999;
+                goto retune;
+            case 'n':
+                if (tuneBreak < tuneCount)
+                    tuneBreak++;
+                goto retune;
+           case 'N':
+                if (--tuneBreak < 0)
+                    tuneBreak = 0;
+                goto retune;
         }
      }
 }
@@ -578,9 +591,9 @@ void viewResistReactMaps()
     // all count graphs have to be at the end of this list after count1_gr
     enum { tuned1_less_best, tuned2_less_best, tuned2_less_tuned1, tuned1_less_tuned2, best_gr, count1_gr, count2_gr, count2_less_count1, count1_less_count2 };
     const char *graphs[] = { "Tuned1 - Best", "Tuned2 - Best", "Tuned2 - Tuned1", "Tuned1 - Tuned2", "Best", "Count1", "Count2", "Count2 - Count1", "Count1 - Count2" };
-    int finx = 0;
+    int finx = 3;
     int sinx = 0;
-    int graph = 0;
+    int graph = 2;
     int zoom = 0;
 
     for (;;) {
@@ -741,13 +754,9 @@ void viewResistReactMaps()
             case 'b':
                 viewHighestHit();
                 break;
-            case '!':
-                showTuning = 1;
-            case '1':
+             case '1':
                 zoom = 1;
                 break;
-            case '@':
-                showTuning = 1;
             case '2':
                 zoom = 2;
                 break;
