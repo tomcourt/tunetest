@@ -40,10 +40,10 @@ int _getch(void) {
 // #define ANSI_NEGATIVE "\033[31m"             // red text
 #define ANSI_NORMAL "\033[0m"
 
-#define N_RESISTANCES sizeof(resistances)/sizeof(double)
-#define N_REACTANCES sizeof(reactances)/sizeof(double)
-#define N_FREQS sizeof(freqs)/sizeof(double)
-#define NATIVE sizeof(freqs)/sizeof(double)
+#define N_RESISTANCES (sizeof(resistances)/sizeof(double))
+#define N_REACTANCES (sizeof(reactances)/sizeof(double))
+#define N_FREQS (sizeof(freqs)/sizeof(double))
+#define NATIVE (sizeof(freqs)/sizeof(double))
 
 
 typedef struct {
@@ -204,6 +204,15 @@ void resetTune(double freq, double complex Zin)
 }
 
 
+void printCharArray(const char *name, char *array, size_t size) 
+{
+    printf("static const char %s[%zu] = {", name, size);
+    for (size_t i=0; i<size; i++)
+        printf("%3d,",array[i]);
+    printf("};\r\n");
+}
+
+
 void viewHighestHit()
 {
     int xsize = 64, ysize = 32;
@@ -212,36 +221,38 @@ void viewHighestHit()
     int sinx = 0, zoom = 4;
     int highestHit[2][128][128];
     int allHit[2][128][128];
-    int highestCount = 0;
+    int numWags = 0;
     char skips[N_FREQS][N_RESISTANCES][N_REACTANCES];
+    char wagSw[200];
+    char wagL[200];
+    char wagC[200];
 
     memset(highestHit, 0, sizeof(highestHit));
     memset(allHit, 0, sizeof(allHit));
     memset(skips, 0, sizeof(skips));
-
-   
-    // Find 1st, 2nd, 3rd etc. LC most likely to be <10 SWR
+ 
+    // Find 1st, 2nd, 3rd etc. LC most likely to be <9 SWR
     printf(ANSI_CLEAR_SCREEN_AND_HOME); 
     printf("Sw\tL\tC\tcount\n");
-    for (highestCount=0; highestCount<100; highestCount++) {
+    for (numWags=0; numWags<200; numWags++) {
         int highCount = 0;
         relay_t highRelay;
         for (int s=0; s<2; s++) {
             for (int l=0; l<128; l++) {
                 for (int c=0; c<128; c++) {
-                    // for every relay configuration, find out a count of rr test points will hill climb
+                    // for every relay configuration, find out a count of rr test points will hill climb (have <9 point)
                     int count = 0;
                     for (int f=0; f<N_FREQS; f++) 
                         for (int r=0; r<N_RESISTANCES; r++) 
                             for (int j=0; j<N_REACTANCES; j++)
                                 if (!skips[f][r][j] && bestRelays[f][r][j].sw == s)
-                                    if (allSWRs[f][r][j][s][l][c] < 10.0 && allSWRs[f][r][j][s][l][c] > 0)
+                                    if (allSWRs[f][r][j][s][l][c] < 9.0 && allSWRs[f][r][j][s][l][c] > 0)
                                         count++;
                     if (count > highCount) {
                         highCount = count;
                         highRelay.sw = s;
-                        highRelay.l = l;
-                        highRelay.c = c;
+                        highRelay.l  = l;
+                        highRelay.c  = c;
                     }
                 }
             }
@@ -249,26 +260,41 @@ void viewHighestHit()
         if (highCount == 0)
             break;
         highestHit[highRelay.sw][highRelay.l][highRelay.c] = highCount;   
+        wagSw[numWags] = highRelay.sw;
+        wagL[numWags]  = highRelay.l;
+        wagC[numWags]  = highRelay.c;
+        
         printf("%d\t%d\t%d\t%d\n", highRelay.sw, highRelay.l, highRelay.c, highCount);
-        // The LC point found covers all others that have a SWR < 10, so skip those in the succeeding iterations
+        // The LC point found covers all others that have a SWR < 9, so skip those in the succeeding iterations
         for (int f=0; f<N_FREQS; f++) 
             for (int r=0; r<N_RESISTANCES; r++) 
                 for (int j=0; j<N_REACTANCES; j++)
                     if (bestRelays[f][r][j].sw == highRelay.sw)
-                        if (allSWRs[f][r][j][highRelay.sw][highRelay.l][highRelay.c] < 10.0 && allSWRs[f][r][j][highRelay.sw][highRelay.l][highRelay.c] > 0)
+                        if (allSWRs[f][r][j][highRelay.sw][highRelay.l][highRelay.c] < 9.0 && allSWRs[f][r][j][highRelay.sw][highRelay.l][highRelay.c] > 0)
                             skips[f][r][j] = 1;
-    }
+    } 
     
+    printCharArray("wagSw", wagSw, numWags);
+    printCharArray("wagL",  wagL,  numWags);
+    printCharArray("wagC",  wagC,  numWags);
+
     for (int s=0; s<2; s++) 
         for (int l=0; l<128; l++) 
             for (int c=0; c<128; c++) 
                  for (int f=0; f<N_FREQS; f++) 
                     for (int r=0; r<N_RESISTANCES; r++) 
                         for (int j=0; j<N_REACTANCES; j++)
-                            if (allSWRs[f][r][j][s][l][c] < 10.0 && allSWRs[f][r][j][s][l][c] > 0)
+                            if (allSWRs[f][r][j][s][l][c] < 9.0 && allSWRs[f][r][j][s][l][c] > 0)
                                 allHit[s][l][c]++;                                
  
-     printf("press a key\n");
+    printf("Tune fails, why are so many of these happening? Some have no solution, but the rest?\n");
+    for (int f=0; f<N_FREQS; f++) 
+            for (int r=0; r<N_RESISTANCES; r++) 
+                for (int j=0; j<N_REACTANCES; j++)
+                    if (skips[f][r][j] == 0)
+                        printf("%d,%d,%d\n", f, r, j);
+
+    printf("press a key\n");
     _getch();
 
     for (;;) {
@@ -435,7 +461,7 @@ retune:
         double curScale = scale[sinx];
         printf(ANSI_CLEAR_SCREEN_AND_HOME); 
         if (tuneBreak == 999)
-            printf("y=%d, x=%d, cSw=%d, zoom=%d   (%d,%d) %.1f%+.1fj   tunes=%d   #=%.2f SWR\n", yoff, xoff, capsw, zoom, resistanceInx, reactanceInx, creal(Zin), cimag(Zin), tuneCount, lastSWR/100.0);
+            printf("y=%d, x=%d, cSw=%d, zoom=%d   (%d,%d) %.1f%+.1fj   tunes=%d   #=%.2f SWR\n", yoff, xoff, capsw, zoom, resistanceInx, reactanceInx, creal(Zin), cimag(Zin), tuneCount, SWR/100.0);
         else
             printf("y=%d, x=%d, cSw=%d, zoom=%d   c=%d l=%d sw=%d   tunes=%d/%d   #=%.2f SWR\n", yoff, xoff, capsw, zoom, lastTuneC, lastTuneL, lastTuneCsw, tuneBreak, tuneCount, lastSWR/100.0);
         
@@ -789,7 +815,8 @@ int main()
             nativeSWRs[r][j] = calcSWR(resistances[r]+I*reactances[j]);
 
     for (int f=0; f<N_FREQS; f++) 
-        for (int r=0; r<N_RESISTANCES; r++) 
+        for (int r=0; r<N_RESISTANCES; r++) {
+            printf("%lu%% complete\n", (f*N_RESISTANCES+r) * 100 / (N_FREQS*N_RESISTANCES) );
             for (int j=0; j<N_REACTANCES; j++) 
                 for (int l=0; l<128; l++)
                     for (int c=0; c<128; c++) {
@@ -797,6 +824,8 @@ int main()
                         allSWRs[f][r][j][0][l][c] = calcSWR(ZhpLsu(freqs[f], Zin, inductors[l], capacitors[c]));
                         allSWRs[f][r][j][1][l][c] = calcSWR(ZhpLsd(freqs[f], Zin, inductors[l], capacitors[c]));
                     }
+        }
+    printf("Finished allSWRs\n");
 
     for (int f=0; f<N_FREQS; f++) 
         for (int r=0; r<N_RESISTANCES; r++) 

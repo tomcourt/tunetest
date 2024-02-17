@@ -5,16 +5,16 @@
 #include "stdio.h"
 #include "stdbool.h"
 #include "tune.h"
+extern int _getch();
 
 // this allows us to have two 'tune' functions, an new one here and another old one in tune.c
 #define tune() tune2()
 
  
 // Wild a$$ guesses, in order of most likely to least likely to hit
-#define N_WAG 71
-static const char wagSw[N_WAG] = {1,0,1,0,1,1,1,0,1,0,0,1,1,0,1,1,1,1,0,1,0,0,0,1,1,1,1,1,1,1,1,1,1,1,0,1,1,1,1,1,1,0,1,1,0,1,1,1,0,0,1,1,0,1,1,1,1,1,1,1,0,0,1,1,0,0,1,1,1,1,1};
-static const char wagL[N_WAG] = {44,47,9,61,5,37,11,25,54,17,3,9,56,12,3,99,15,12,24,25,10,26,27,22,7,124,8,64,2,15,26,43,64,81,16,5,14,17,78,10,30,8,6,32,3,13,19,125,9,11,10,16,3,4,6,28,41,72,95,118,48,72,12,55,1,26,3,11,16,32,46};
-static const char wagC[N_WAG] = {35,44,3,7,2,2,120,3,6,13,1,1,1,120,3,11,7,1,8,13,2,4,19,1,1,1,1,26,5,1,3,7,14,2,5,1,2,15,4,1,1,10,1,8,3,1,1,9,31,15,7,1,2,1,2,3,22,13,10,8,2,4,2,5,5,8,1,1,4,1,2};
+static const char wagSw[82] = {1,0,1,0,1,1,1,1,0,0,0,1,1,0,0,1,1,1,1,1,0,0,1,1,0,1,1,1,1,0,1,0,1,1,1,1,1,1,0,1,1,1,1,1,0,1,1,1,0,1,1,0,1,1,0,1,1,1,0,1,1,1,1,0,0,0,1,1,1,1,0,0,0,0,0,1,1,1,1,1,1,1,};
+static const char wagL[82] = {42,44,10,48,6,54,11,37,7,6,3,55,3,65,45,11,93,16,8,24,12,4,4,2,3,64,13,122,21,12,7,13,10,11,55,64,15,40,10,6,43,64,16,16,6,19,112,122,8,4,17,23,9,24,20,32,42,70,4,5,12,96,122,1,15,16,3,4,22,71,2,2,4,51,64,1,6,10,18,18,20,29,};
+static const char wagC[82] = {36,50,3,7,2,6,121,2,2,13,1,1,3,15,4,1,12,6,1,15,24,5,2,7,3,28,1,1,1,8,1,115,1,8,2,11,1,1,10,1,7,4,1,16,18,1,4,8,35,1,4,2,1,3,6,8,21,2,4,1,2,9,9,3,20,4,1,5,1,3,2,8,15,4,6,3,8,20,4,13,38,9,};
 
 
 static int testSwLC(char l, char c, char swCap)
@@ -37,7 +37,7 @@ static char n_MRUs = 0;
 
 
 // Add to start of the MRU list, will push older MRUs down by 1 stopping at length
-static int add_to_MRU(char l, char c, int swr, char length)
+static int add_to_MRU(char l, char c, int swrt, char length)
 {
    for (int i=length; i>0; i--) {
       MRU_l[i] = MRU_l[i-1];
@@ -46,8 +46,8 @@ static int add_to_MRU(char l, char c, int swr, char length)
    }
    MRU_l[0] = ind = l;
    MRU_c[0] = cap = c;
-   MRU_swr[0] = SWR = swr;
-   return swr;
+   MRU_swr[0] = SWR = swrt;
+   return swrt;
 }
 
 
@@ -60,60 +60,54 @@ static int SWRgetMRU(char l, char c)
          return add_to_MRU(MRU_l[i], MRU_c[i], MRU_swr[i], i);
       }
    if (++n_MRUs > sizeof(MRU_l)-1)
-      n_MRUs = sizeof(MRU_l)-1;
+      n_MRUs = sizeof(MRU_l)-1;        // TODO this -1 math seems wrong, likely wasting an MRU entry, but needs fixing in add_to_MRU or will overrun
    return add_to_MRU(l, c, testSwLC(l, c, SW), n_MRUs);
 }
 
 
+// Try new point and update globals if better, true if no change (isBest)
+static bool bestSWR(char l, char c, bool isEqual)
+{
+   if (l==(char)128 || l==(char)255 || c==(char)128 || c==(char)255)
+      return true;
+   int oldSWR = SWR;
+   char oldInd = ind;
+   char oldCap = cap;
+   int swrt = SWRgetMRU(l, c);
+   if (swrt < oldSWR) 
+      return false;
+   if (isEqual && swrt == oldSWR)
+      return false;
+   SWR = oldSWR;
+   ind = oldInd;
+   cap = oldCap;
+   return true;
+}
+
+
+// Hill climb along an axis by finding best of current and dist to either direction along axis (true ind, false cap)
 static bool hillClimbAxis(char l, char c, char dist, bool axis)
 {
-   int swr[3] = {1000, 1000, 1000};
    char vary = (axis ? l : c);
    // less dist or half the distance to the edge
    int minus = (vary>=dist) ? vary-dist : vary/2;   
    int plus = vary + dist;
 
-   // try tuning both directons, but don't run off edge
-   swr[1] = SWR;
-   if (vary != minus)
-      swr[0] = (axis ? SWRgetMRU(minus, c) : SWRgetMRU(l, minus));
+   bool isUpTest = true;
+   bool isDownTest = true;
    if (plus < 128 && vary != plus)
-      swr[2] = (axis ? SWRgetMRU(plus, c) : SWRgetMRU(l, plus));
-  
-   // find lowest of original point, a smaller and a larger point along axis of interest
-   int lowest = swr[1];
-   int isBest = true;
-   if (axis)
-      ind = vary;
-   else
-      cap = vary;
-
-   // prefer moving towards lower values when equal
-   if (swr[0] <= lowest) {
-      lowest = swr[0];
-      if (axis)
-         ind = minus;
-      else
-         cap = minus;
-      isBest = false;
-   }
-   if (swr[2] < lowest) {
-      lowest = swr[2];
-      if (axis)
-         ind = plus;
-      else
-         cap = plus;
-      isBest = false;
-   }
-   SWR = lowest;
-   return isBest;
+      isUpTest = (axis ? bestSWR(plus, c, false) : bestSWR(l, plus, false));
+   if (vary != minus)
+      isDownTest = (axis ? bestSWR(minus, c, true) : bestSWR(l, minus, true));
+   return isUpTest && isDownTest;
 }
 
 
-static void hillClimb() 
+// Found a hill, try hill climbing to the top
+// first do a course search (0) and then a fine search (1)
+// (this reduces hill climbing switching)
+static void hillClimb4Way() 
 {
-   // Found a hill, try hill climbing to the top
-   // first do a course search (0) and then a fine search (1), this reduces hill climbing switching
    for (int i=0; i<2; i++) {
       char startL;
       char startC;
@@ -126,7 +120,7 @@ static void hillClimb()
             do {
                if (hillClimbAxis(ind, cap, dist, (j==0))) {
                   // start with course moves only 
-                   if (i == 0)
+                  if (i == 0)
                      break;
                   dist /= 2;
                }
@@ -138,17 +132,41 @@ static void hillClimb()
 }
 
 
+// Found a hill, try hill climbing to the top
+// Try stepping in all 8 directions, but only one step at a time
+// (as this is inefficent, only do so if we couldn't optimize it earlier)
+static void hillClimb8Way() 
+{
+   char startL;
+   char startC;
+   do {
+      startL = ind;
+      startC = cap;
+      bestSWR(startL+1, startC+1, false);
+      bestSWR(startL+1, startC,   false);
+      bestSWR(startL,   startC+1, false);
+      bestSWR(startL-1, startC+1, false);
+      bestSWR(startL+1, startC-1, false);
+      bestSWR(startL,   startC-1, false);
+      bestSWR(startL-1, startC,   false);
+      bestSWR(startL-1, startC-1, false);
+      // keep going until moving no longer causes improvement
+   } while (ind != startL || cap != startC);
+   testSwLC(ind, cap, SW);
+}
+
+
 void tune() 
 {
-   char avoidSw = 2;    // start by not avoiding either cap setting
+   char avoidSw = 2;       // start by not avoiding either cap setting
    char saveInd;
    char saveCap;
    int saveSWR = 1001;
-   for (int i=0; i<N_WAG; i++)
+   for (size_t i=0; i<sizeof(wagSw); i++)
       if (wagSw[i] != avoidSw && testSwLC(wagL[i], wagC[i], wagSw[i]) < 999) {
          SW = wagSw[i];
-         n_MRUs = 0;    // clear the MRU (because it only covers one cap switch side)
-         hillClimb();    // hill climb from the starting point provided
+         n_MRUs = 0;       // clear the MRU (because it only covers one cap switch side)
+         hillClimb4Way();  // hill climb from the starting point provided
          if (SWR < 120 || avoidSw != 2) 
             break;
 
@@ -158,9 +176,12 @@ void tune()
          saveCap = cap;
          saveSWR = SWR;
       }
+   
    // need to tune back to best found from either cap side
    if (saveSWR < SWR)
       testSwLC(saveInd, saveCap, avoidSw);
    else
       testSwLC(ind, cap, SW);
+   if (SWR >= 120 && SWR < 999) 
+      hillClimb8Way();
 }
