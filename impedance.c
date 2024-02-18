@@ -175,10 +175,10 @@ void Relay_set(char l, char c, char i)
     l &= 127; 
     c &= 127;
     i &= 1;
-    if (i) // TODO - which side should the C be on the LC?, guessing for now, probably doesn't matter
-        SWRexact = calcSWR(ZhpLsu(tuneFreq, tuneImp, inductors[l], capacitors[c]));
-    else
+    if (i) // TODO - which side should the C be on the LC according to schematic?, WAGs can make this non optimal
         SWRexact = calcSWR(ZhpLsd(tuneFreq, tuneImp, inductors[l], capacitors[c]));
+    else
+        SWRexact = calcSWR(ZhpLsu(tuneFreq, tuneImp, inductors[l], capacitors[c]));
 
     tuneCount++;
     if (tuneCount <= tuneBreak) {
@@ -246,9 +246,10 @@ void viewHighestHit()
                         for (int r=0; r<N_RESISTANCES; r++) 
                             for (int j=0; j<N_REACTANCES; j++)
                                 if (!skips[f][r][j] && bestRelays[f][r][j].sw == s)
-                                    if (allSWRs[f][r][j][s][l][c] < 9.0 && allSWRs[f][r][j][s][l][c] > 0)
+                                    if (allSWRs[f][r][j][s][l][c] < 9.9 && allSWRs[f][r][j][s][l][c] > 0)
                                         count++;
                     if (count > highCount) {
+                        // find the relay configuration that will start a hill climb for the most test points (of those not already covered)
                         highCount = count;
                         highRelay.sw = s;
                         highRelay.l  = l;
@@ -270,7 +271,7 @@ void viewHighestHit()
             for (int r=0; r<N_RESISTANCES; r++) 
                 for (int j=0; j<N_REACTANCES; j++)
                     if (bestRelays[f][r][j].sw == highRelay.sw)
-                        if (allSWRs[f][r][j][highRelay.sw][highRelay.l][highRelay.c] < 9.0 && allSWRs[f][r][j][highRelay.sw][highRelay.l][highRelay.c] > 0)
+                        if (allSWRs[f][r][j][highRelay.sw][highRelay.l][highRelay.c] < 9.9 && allSWRs[f][r][j][highRelay.sw][highRelay.l][highRelay.c] > 0)
                             skips[f][r][j] = 1;
     } 
     
@@ -284,15 +285,22 @@ void viewHighestHit()
                  for (int f=0; f<N_FREQS; f++) 
                     for (int r=0; r<N_RESISTANCES; r++) 
                         for (int j=0; j<N_REACTANCES; j++)
-                            if (allSWRs[f][r][j][s][l][c] < 9.0 && allSWRs[f][r][j][s][l][c] > 0)
+                            if (allSWRs[f][r][j][s][l][c] < 9.9 && allSWRs[f][r][j][s][l][c] > 0)
                                 allHit[s][l][c]++;                                
- 
-    printf("Tune fails, why are so many of these happening? Some have no solution, but the rest?\n");
-    for (int f=0; f<N_FREQS; f++) 
-            for (int r=0; r<N_RESISTANCES; r++) 
-                for (int j=0; j<N_REACTANCES; j++)
-                    if (skips[f][r][j] == 0)
-                        printf("%d,%d,%d\n", f, r, j);
+  
+    // Wag testing code, this returns empty, but can be used for non-table based start point testing 
+    // printf("Additional Misses\n");
+    // for (int f=0; f<N_FREQS; f++) 
+    //     for (int r=0; r<N_RESISTANCES; r++) 
+    //         for (int j=0; j<N_REACTANCES; j++)
+    //             if (bestSWRs[f][r][j] < 9.9) {
+    //                 int i;
+    //                 for (i=0; i<numWags; i++)
+    //                     if (allSWRs[f][r][j][wagSw[i]][wagL[i]][wagC[i]] < 9.9)
+    //                         break;
+    //                 if (i==numWags)
+    //                     printf("%d %d %d\n", f, r, j);
+    //             }
 
     printf("press a key\n");
     _getch();
@@ -313,7 +321,7 @@ void viewHighestHit()
 
         double curScale = scale[sinx] * 10;
         printf(ANSI_CLEAR_SCREEN_AND_HOME); 
-        printf("y=%d, x=%d, cSw=%d, zoom=%d    count=%d\n", yoff, xoff, capsw, zoom, highestCount);
+        printf("y=%d, x=%d, cSw=%d, zoom=%d    count=%d\n", yoff, xoff, capsw, zoom, numWags);
         for (int y=yoff, r=0; y<yoff+ysize*zoom; y+=zoom, r++) {
             for (int x=xoff; x<xoff+xsize*zoom; x+=zoom) {
                 // sum values in zoom x zoom square
@@ -428,8 +436,8 @@ retune:
 
     for (int linx=0; linx<lcsize; linx++) {
         for (int cinx=0; cinx<lcsize; cinx++) {
-            tunedMapSWR[0][linx][cinx] = calcSWR(ZhpLsd(freq, Zin, inductors[linx], capacitors[cinx]));
-            tunedMapSWR[1][linx][cinx] = calcSWR(ZhpLsu(freq, Zin, inductors[linx], capacitors[cinx]));
+            tunedMapSWR[0][linx][cinx] = calcSWR(ZhpLsu(freq, Zin, inductors[linx], capacitors[cinx]));
+            tunedMapSWR[1][linx][cinx] = calcSWR(ZhpLsd(freq, Zin, inductors[linx], capacitors[cinx]));
         }
     }
 
