@@ -29,7 +29,8 @@ static int testSwLC(char l, char c, char swCap)
 }
 
 
-// Most Recently Used (MRU) SWRs, use stored SWR reading for most recent tune attempts during hill a hill climb
+// Most Recently Used (MRU) SWRs, use stored SWR reading for the 
+// most recent tune attempts during hill a hill climb to avoid repeats
 static char MRU_l[8];
 static char MRU_c[8];
 static int MRU_swr[8];
@@ -39,7 +40,8 @@ static char n_MRUs = 0;
 // Add to start of the MRU list, will push older MRUs down by 1 stopping at length
 static int add_to_MRU(char l, char c, int swrt, char length)
 {
-   for (int i=length; i>0; i--) {
+   int i;
+   for (i=length; i>0; i--) {
       MRU_l[i] = MRU_l[i-1];
       MRU_c[i] = MRU_c[i-1];
       MRU_swr[i] = MRU_swr[i-1];
@@ -54,26 +56,34 @@ static int add_to_MRU(char l, char c, int swrt, char length)
 // Get the SWR for a L,C point. Avoid re-tuning the same points by maintaining a most recently used list
 static int SWRgetMRU(char l, char c)
 {
-   for (int i=0; i<n_MRUs; i++)
+   int i;
+   for (i=0; i<n_MRUs; i++)
       if (MRU_l[i] == l && MRU_c[i] == c) {
          // found a matching entry, moving entry to front, adding will overwrite the older copy    
          return add_to_MRU(MRU_l[i], MRU_c[i], MRU_swr[i], i);
       }
-   if (++n_MRUs > sizeof(MRU_l)-1)
-      n_MRUs = sizeof(MRU_l)-1;        // TODO this -1 math seems wrong, likely wasting an MRU entry, but needs fixing in add_to_MRU or will overrun
-   return add_to_MRU(l, c, testSwLC(l, c, SW), n_MRUs);
+   if (++n_MRUs > sizeof(MRU_l))
+      n_MRUs = sizeof(MRU_l);
+   return add_to_MRU(l, c, testSwLC(l, c, SW), n_MRUs-1);
 }
 
 
-// Try new point and update globals if better, true if no change (isBest)
+// Compare new point (l, c) with current point (ind, cap, SWR) and update 'ind' and 'cap' 
+// if better, otherwise leave them alone. When isEqual is true, will move to lower point 
+// when SWR is equal with current point. Returns true if no change (is already best)
 static bool bestSWR(char l, char c, bool isEqual)
 {
+   int oldSWR;
+   char oldInd;
+   char oldCap;
+   int swrt;
+
    if (l==(char)128 || l==(char)255 || c==(char)128 || c==(char)255)
       return true;
-   int oldSWR = SWR;
-   char oldInd = ind;
-   char oldCap = cap;
-   int swrt = SWRgetMRU(l, c);
+   oldSWR = SWR;
+   oldInd = ind;
+   oldCap = cap;
+   swrt = SWRgetMRU(l, c);
    if (swrt < oldSWR) 
       return false;
    if (isEqual && swrt == oldSWR)
@@ -85,19 +95,21 @@ static bool bestSWR(char l, char c, bool isEqual)
 }
 
 
-// Hill climb along an axis by finding best of current and dist to either direction along axis (true ind, false cap)
+// Hill climb along an axis by finding best of current point (l,c) and 
+// dist offset to either direction along axis (true if ind, false if cap)
+// NOTE - lots of use of ? operator so this function can move both along ind axis and cap axis
 static bool hillClimbAxis(char l, char c, char dist, bool axis)
 {
-   char vary = (axis ? l : c);
+   char start = (axis ? l : c);
    // less dist or half the distance to the edge
-   int minus = (vary>=dist) ? vary-dist : vary/2;   
-   int plus = vary + dist;
+   int minus = (start>=dist) ? start-dist : start/2;   
+   int plus = start + dist;
 
    bool isUpTest = true;
    bool isDownTest = true;
-   if (plus < 128 && vary != plus)
+   if (plus < 128 && start != plus)
       isUpTest = (axis ? bestSWR(plus, c, false) : bestSWR(l, plus, false));
-   if (vary != minus)
+   if (start != minus)
       isDownTest = (axis ? bestSWR(minus, c, true) : bestSWR(l, minus, true));
    return isUpTest && isDownTest;
 }
@@ -106,17 +118,24 @@ static bool hillClimbAxis(char l, char c, char dist, bool axis)
 // Found a hill, try hill climbing to the top
 // first do a course search (0) and then a fine search (1)
 // (this reduces hill climbing switching)
+// NOTE - skipping course step results in 2% worse tuning, but saves 10+ about 25% of the times
 static void hillClimb4Way() 
 {
-   for (int i=0; i<2; i++) {
+   int i;
+   int j;
+
+   for (i=0; i<2; i++) {
       char startL;
       char startC;
       do {
          startL = ind;
          startC = cap;
          // Optimize each axis
-         for (int j=0; j<2; j++) {
-            int dist = 32;
+         for (j=0; j<2; j++) {
+            // TODO - the following change reduces tuning by 10+ about 15% 
+            // of the time in exchange for worse tuning .7% of the time 
+            // int dist = (i ? 16 : 32);
+            int dist = 32;    
             do {
                if (hillClimbAxis(ind, cap, dist, (j==0))) {
                   // start with course moves only 
@@ -162,7 +181,9 @@ void tune()
    char saveInd;
    char saveCap;
    int saveSWR = 1001;
-   for (size_t i=0; i<sizeof(wagSw); i++)
+   size_t i;
+
+   for (i=0; i<sizeof(wagSw); i++)
       if (wagSw[i] != avoidSw && testSwLC(wagL[i], wagC[i], wagSw[i]) < 999) {
          SW = wagSw[i];
          n_MRUs = 0;       // clear the MRU (because it only covers one cap switch side)
@@ -182,6 +203,7 @@ void tune()
       testSwLC(saveInd, saveCap, avoidSw);
    else
       testSwLC(ind, cap, SW);
+   // only do 8 way climb if haven't reach 1.2 SWR
    if (SWR >= 120 && SWR < 999) 
       hillClimb8Way();
 }
